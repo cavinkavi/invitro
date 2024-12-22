@@ -14,7 +14,7 @@
 | AsyncWaitToCollectMin [^6]   | int       | >= 0                                                                | 0                   | Time after experiment ends after which to collect invocation results                 |  
 | RpsTarget                    | int       | >= 0                                                                | 0                   | Number of requests per second to issue                                               | 
 | RpsColdStartRatioPercentage  | int       | >= 0 && <= 100                                                      | 0                   | Percentage of cold starts out of specified RPS                                       | 
-| RpsCooldownSeconds           | int       | > 0                                                                 | 0                   | The time it takes for the autoscaler to downscale function (higher for higher RPS)   |
+| RpsCooldownSeconds [^7]      | int       | > 0                                                                 | 0                   | The time it takes for the autoscaler to downscale function (higher for higher RPS)   |
 | RpsImage                     | string    | N/A                                                                 | N/A                 | Function image to use for RPS experiments                                            |
 | RpsRuntimeMs                 | int       | >=0                                                                 | 0                   | Requested execution time                                                             |
 | RpsMemoryMB                  | int       | >=0                                                                 | 0                   | Requested memory                                                                     |
@@ -54,6 +54,8 @@ this [table](https://cloud.google.com/functions/pricing#compute_time) for Google
 Lambda; https://aws.amazon.com/about-aws/whats-new/2018/10/aws-lambda-supports-functions-that-can-run-up-to-15-minutes/
 
 [^6]: Dirigent specific
+
+[^7] It is recommended that the first 10% of cold starts are discarded from the experiment results for low cold start RPS.
 
 ---
 
