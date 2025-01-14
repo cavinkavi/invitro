@@ -1,19 +1,18 @@
 import time
-import os
 import socket
 import json
-from typing import Dict
+import azure.functions as func
+import logging
+from time import perf_counter
 
-# Global variables for IterationsMultiplier and hostname
-IterationsMultiplier = 102  # Assuming similar cloud benchmark setup
+# Global variable for hostname
 hostname = socket.gethostname()
 
 # Simulate the busySpin function
-def busy_spin(runtime_milli: int):
-    total_iterations = IterationsMultiplier * runtime_milli
-    for _ in range(total_iterations):
-        # Simulate a math-heavy operation
-        sqrt_of_10 = 10 ** 0.5
+def busy_spin(duration_ms: int) -> None:
+    end_time = perf_counter() + duration_ms / 1000  # Convert ms to seconds
+    while perf_counter() < end_time:
+        continue
 
 # Convert TraceFunctionExecution
 def trace_function_execution(start: float, time_left_milliseconds: int) -> str:
@@ -26,9 +25,6 @@ def trace_function_execution(start: float, time_left_milliseconds: int) -> str:
     return f"OK - {hostname}"
 
 # The handler function for Azure Functions (Python)
-import azure.functions as func
-import logging
-
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Processing request.")
 
@@ -56,6 +52,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     # Prepare the response
     response = {
+        "Status": "Success",
+        "Function": req.url.split("/")[-1],
+        "MachineName": hostname,
+        "ExecutionTime": int((time.time() - start_time) * 1_000_000), 
         "DurationInMicroSec": int((time.time() - start_time) * 1_000_000),
         "MemoryUsageInKb": memory_mebibytes * 1024,
         "Message": result_msg
