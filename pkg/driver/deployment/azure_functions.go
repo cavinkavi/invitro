@@ -38,11 +38,10 @@ func (afd *azureFunctionsDeployer) Deploy(cfg *config.Configuration) {
 }
 
 func (afd *azureFunctionsDeployer) Clean() {
-	cleanAzureFunctions(afd.functions)
+	cleanAzureFunctions()
 }
 
 func deployAzureFunctions(functions []*common.Function) {
-
 	// 1. Initialize resources required for Azure Functions deployment
 	// 2. Create function folders
 	// 3. Zip function folders
@@ -73,27 +72,39 @@ func deployAzureFunctions(functions []*common.Function) {
 	if err := DeployFunction(config, functions); err != nil {
 		log.Fatalf("Error deploying function: %s", err)
 	}
-
 }
 
-func cleanAzureFunctions(functions []*common.Function) {
+func cleanAzureFunctions() {
+	// Load azurefunctionsconfig yaml file
+	config, err := LoadConfig("azurefunctions_setup/azurefunctionsconfig.yaml")
+	if err != nil {
+		log.Fatalf("Error loading azure functions config yaml: %s", err)
+	}
 
-	//Delete created folders
-	//Delete zip file
-	//Delete Azure resources
+	log.Infof("Performing cleanup of experiment...")
 
+	// Call the cleanup function to delete temp folders and files
+	if err := cleanUpDeploymentFiles("azure_functions_for_zip", "azurefunctions.zip"); err != nil {
+		log.Errorf("Error during cleanup: %s", err)
+	} else {
+		log.Debug("Cleanup of temp folders zip files completed successfully.")
+	}
+
+	// Delete Azure resources
+	if err := DeleteResourceGroup(config); err != nil {
+		log.Errorf("Cleanup failed: %v", err)
+	} else {
+		log.Infof("Cleanup completed successfully.")
+	}
 }
 
 /* Functions for initializing resources required for Azure Functions deployment */
 
 func initAzureFunctions(config *Config) {
-
-	// 1.Create Resource Group
-	// 2.Create Storage Account
-	// 3.Create Function App
-	// 4.Set WEBSITE_RUN_FROM_PACKAGE
-
-	//checkDependencies()	ToDo: Check if all required dependencies are installed on VM
+	// 1. Create Resource Group
+	// 2. Create Storage Account
+	// 3. Create Function App
+	// 4. Set WEBSITE_RUN_FROM_PACKAGE
 
 	// 1. Create Resource Group
 	if err := CreateResourceGroup(config); err != nil {
@@ -139,7 +150,7 @@ func CreateResourceGroup(config *Config) error {
 		return fmt.Errorf("failed to create resource group: %w", err)
 	}
 
-	log.Infof("Resource group %s created successfully.", config.AzureConfig.ResourceGroup)
+	log.Debugf("Resource group %s created successfully.", config.AzureConfig.ResourceGroup)
 	return nil
 }
 
@@ -155,7 +166,7 @@ func CreateStorageAccount(config *Config) error {
 		return fmt.Errorf("failed to create storage account: %w", err)
 	}
 
-	log.Infof("Storage account %s created successfully.", config.AzureConfig.StorageAccountName)
+	log.Debugf("Storage account %s created successfully.", config.AzureConfig.StorageAccountName)
 	return nil
 }
 
@@ -175,7 +186,7 @@ func CreateFunctionApp(config *Config) error {
 		return fmt.Errorf("failed to create function app: %w", err)
 	}
 
-	log.Infof("Function app %s created successfully.", config.AzureConfig.FunctionAppName)
+	log.Debugf("Function app %s created successfully.", config.AzureConfig.FunctionAppName)
 	return nil
 }
 
@@ -190,7 +201,7 @@ func SetWebsiteRunFromPackage(config *Config) error {
 		return fmt.Errorf("failed to set WEBSITE_RUN_FROM_PACKAGE: %w", err)
 	}
 
-	log.Info("WEBSITE_RUN_FROM_PACKAGE set successfully.")
+	log.Debug("WEBSITE_RUN_FROM_PACKAGE set successfully.")
 	return nil
 }
 
@@ -198,7 +209,6 @@ func SetWebsiteRunFromPackage(config *Config) error {
 
 // Function to create folders and copy files to the folders
 func createFunctionFolders(baseDir string, function []*common.Function) error {
-
 	for i := 0; i < len(function); i++ {
 		folderName := fmt.Sprintf("function%d", i)
 		folderPath := filepath.Join(baseDir, folderName)
@@ -249,20 +259,19 @@ func copyFile(src, dst string) error {
 /* Functions for zipping created function folders */
 
 func ZipFunctionAppFiles() error {
-
-	// Use bash to zip the contents of azure_functions_for_zip/* along with host.json directly into azurefunctions.zip
+	// Use bash to zip the contents of azure_functions_for_zip/ along with host.json directly into azurefunctions.zip
 	cmd := exec.Command("bash", "-c", "cd azure_functions_for_zip && zip -r ../azurefunctions.zip . && cd .. && zip -j azurefunctions.zip azurefunctions_setup/host.json")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to zip function app files for deployment: %w", err)
 	}
-	log.Info("Functions for deployment zipped successfully.")
+
+	log.Debug("Functions for deployment zipped successfully.")
 	return nil
 }
 
 /* Functions for deploying zipped functions */
 
 func DeployFunction(config *Config, function []*common.Function) error {
-
 	log.Infof("Deploying %d functions to Azure Function App...", len(function))
 
 	// Path to the zip file that contains the Python binary and other resources for deployment to Azure
@@ -278,7 +287,7 @@ func DeployFunction(config *Config, function []*common.Function) error {
 		return fmt.Errorf("failed to deploy zip file to function app: %w", err)
 	}
 
-	log.Infof("Deployed all %d functions successfully.", len(function))
+	log.Infof("Deployed all %d functions successfully, with the following endpoints.", len(function))
 
 	// Storing endpoint for each function
 	for i := 0; i < len(function); i++ {
@@ -286,25 +295,14 @@ func DeployFunction(config *Config, function []*common.Function) error {
 		log.Infof("Function %s set to %s", function[i].Name, function[i].Endpoint)
 	}
 
-	// Call the cleanup function after deployment, to delete temp folders and files
-	if err := cleanUpDeploymentFiles("azure_functions_for_zip", "azurefunctions.zip"); err != nil {
-		log.Errorf("Error during cleanup: %s", err)
-	} else {
-		log.Info("Deployment and cleanup of zip files completed successfully.")
-	}
-
-	//Stop the program after deployment for testing purposes, to remove after invocation is implemented
-	log.Info("Stopping program after deployment phase for PR.")
-	os.Exit(0) // Exit with status code 0 (successful execution)
-
 	return nil
-
 }
 
 /* Functions for clean up */
 
 // Clean up temporary files and folders after deployment
 func cleanUpDeploymentFiles(baseDir string, zipFile string) error {
+
 	// Remove the base directory containing function folders
 	if err := os.RemoveAll(baseDir); err != nil {
 		return fmt.Errorf("failed to remove directory %s: %w", baseDir, err)
@@ -317,5 +315,22 @@ func cleanUpDeploymentFiles(baseDir string, zipFile string) error {
 	}
 	log.Debugf("Successfully removed zip file: %s", zipFile)
 
+	return nil
+}
+
+// DeleteResourceGroup deletes the Azure Resource Group
+func DeleteResourceGroup(config *Config) error {
+
+	// Construct the Azure CLI command to delete the resource group
+	dltResourceGrpCmd := exec.Command("az", "group", "delete",
+		"--name", config.AzureConfig.ResourceGroup, // Resource group name
+		"--yes") // Skip confirmation prompt
+
+	// Execute the command
+	if err := dltResourceGrpCmd.Run(); err != nil {
+		return fmt.Errorf("failed to delete resource group: %w", err)
+	}
+
+	log.Debugf("Resource group %s deleted successfully.", config.AzureConfig.ResourceGroup)
 	return nil
 }
