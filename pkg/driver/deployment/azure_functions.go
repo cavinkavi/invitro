@@ -42,10 +42,11 @@ func (afd *azureFunctionsDeployer) Clean() {
 }
 
 func deployAzureFunctions(functions []*common.Function) {
-	// 1. Initialize resources required for Azure Functions deployment
-	// 2. Create function folders
-	// 3. Zip function folders
-	// 4. Deploy the function to Azure Functions
+	// 1. Run script to extract workload from trace_func.py
+	// 2. Initialize resources required for Azure Functions deployment
+	// 3. Create function folders
+	// 4. Zip function folders
+	// 5. Deploy the function to Azure Functions
 
 	// Load azurefunctionsconfig yaml file
 	config, err := LoadConfig("azurefunctions_setup/azurefunctionsconfig.yaml")
@@ -55,20 +56,28 @@ func deployAzureFunctions(functions []*common.Function) {
 
 	baseDir := "azure_functions_for_zip"
 
-	// 1. Initialize resources required for Azure Functions deployment
+	// 1. Run script to extract workload
+	log.Infof("Running workload script to prepare azureworkload.py...")
+	err = runPythonWorkloadScript("azurefunctions_setup/extract-workload.py")
+	if err != nil {
+		log.Fatalf("Error running Python workload script: %s", err)
+	}
+	log.Infof("Python workload extraction completed successfully.")
+
+	// 2. Initialize resources required for Azure Functions deployment
 	initAzureFunctions(config)
 
-	// 2. Create function folders
+	// 3. Create function folders
 	if err := createFunctionFolders(baseDir, functions); err != nil {
 		log.Fatalf("Error setting up function folders required for zipping: %s", err)
 	}
 
-	// 3. Zip function folders
+	// 4. Zip function folders
 	if err := ZipFunctionAppFiles(); err != nil {
 		log.Fatalf("Error zipping function app files for deployment: %s", err)
 	}
 
-	// 4. Deploy the function to Azure Functions
+	// 5. Deploy the function to Azure Functions
 	if err := DeployFunction(config, functions); err != nil {
 		log.Fatalf("Error deploying function: %s", err)
 	}
@@ -98,13 +107,26 @@ func cleanAzureFunctions() {
 	}
 }
 
+/* Helper function to run the Python workload script */
+func runPythonWorkloadScript(scriptPath string) error {
+	cmd := exec.Command("python3", scriptPath) // Adjust to "python" if that's the correct command
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run Python script %s: %w", scriptPath, err)
+	}
+	return nil
+}
+
 /* Functions for initializing resources required for Azure Functions deployment */
 
 func initAzureFunctions(config *Config) {
 	// 1. Create Resource Group
 	// 2. Create Storage Account
 	// 3. Create Function App
-	// 4. Set WEBSITE_RUN_FROM_PACKAGE
+	// 4. Set SCM_DO_BUILD_DURING_DEPLOYMENT
+	// 5. Set ENABLE_ORYX_BUILD
 
 	// 1. Create Resource Group
 	if err := CreateResourceGroup(config); err != nil {
@@ -121,9 +143,14 @@ func initAzureFunctions(config *Config) {
 		log.Fatalf("Error during Function App creation: %s", err)
 	}
 
-	// 4. Set WEBSITE_RUN_FROM_PACKAGE
-	if err := SetWebsiteRunFromPackage(config); err != nil {
-		log.Fatalf("Error setting WEBSITE_RUN_FROM_PACKAGE: %s", err)
+	// 4. Set SCM_DO_BUILD_DURING_DEPLOYMENT
+	if err := SetSCMSettings(config); err != nil {
+		log.Fatalf("failed to set SCM settings: %s", err)
+	}
+
+	// 5. Set ENABLE_ORYX_BUILD
+	if err := SetORYXSettings(config); err != nil {
+		log.Fatalf("failed to set Oryx settings: %s", err)
 	}
 
 	log.Info("Azure Functions environment for deployment initialized successfully.")
@@ -190,18 +217,33 @@ func CreateFunctionApp(config *Config) error {
 	return nil
 }
 
-// SetWebsiteRunFromPackage configures the function app to run from a zip package
-func SetWebsiteRunFromPackage(config *Config) error {
+// SetSCMSettings configures remote build settings for the Azure Function App
+func SetSCMSettings(config *Config) error {
 	cmd := exec.Command("az", "functionapp", "config", "appsettings", "set",
 		"--name", config.AzureConfig.FunctionAppName,
 		"--resource-group", config.AzureConfig.ResourceGroup,
-		"--settings", "WEBSITE_RUN_FROM_PACKAGE=1")
+		"--settings", "SCM_DO_BUILD_DURING_DEPLOYMENT=true")
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to set WEBSITE_RUN_FROM_PACKAGE: %w", err)
+		return fmt.Errorf("failed to set SCM_DO_BUILD_DURING_DEPLOYMENT: %w", err)
 	}
 
-	log.Debug("WEBSITE_RUN_FROM_PACKAGE set successfully.")
+	log.Debugf("SCM_DO_BUILD_DURING_DEPLOYMENT setting configured successfully.")
+	return nil
+}
+
+// SetORYXSettings configures remote build settings for the Azure Function App
+func SetORYXSettings(config *Config) error {
+	cmd := exec.Command("az", "functionapp", "config", "appsettings", "set",
+		"--name", config.AzureConfig.FunctionAppName,
+		"--resource-group", config.AzureConfig.ResourceGroup,
+		"--settings", "ENABLE_ORYX_BUILD=true")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to set ENABLE_ORYX_BUILD: %w", err)
+	}
+
+	log.Debugf("ENABLE_ORYX_BUILD setting configured successfully.")
 	return nil
 }
 
@@ -218,19 +260,16 @@ func createFunctionFolders(baseDir string, function []*common.Function) error {
 			return fmt.Errorf("failed to create folder %s: %w", folderPath, err)
 		}
 
-		// Copy azureworkload.py, requirements.txt, and function.json into each function folder
+		// Copy azureworkload.py and function.json into each function folder
 		if err := copyFile("azurefunctions_setup/shared_azure_workload/azureworkload.py", filepath.Join(folderPath, "azureworkload.py")); err != nil {
 			return fmt.Errorf("failed to copy azureworkload.py to %s: %w", folderPath, err)
-		}
-		if err := copyFile("azurefunctions_setup/shared_azure_workload/requirements.txt", filepath.Join(folderPath, "requirements.txt")); err != nil {
-			return fmt.Errorf("failed to copy requirements.txt to %s: %w", folderPath, err)
 		}
 		if err := copyFile("azurefunctions_setup/shared_azure_workload/function.json", filepath.Join(folderPath, "function.json")); err != nil {
 			return fmt.Errorf("failed to copy function.json to %s: %w", folderPath, err)
 		}
 	}
 
-	log.Debugf("Created %d function folders with copies of azureworkload.py, requirements.txt, and function.json under %s folder.\n", len(function), baseDir)
+	log.Debugf("Created %d function folders with copies of azureworkload.py and function.json under %s folder.\n", len(function), baseDir)
 	return nil
 }
 
@@ -260,7 +299,7 @@ func copyFile(src, dst string) error {
 
 func ZipFunctionAppFiles() error {
 	// Use bash to zip the contents of azure_functions_for_zip/ along with host.json directly into azurefunctions.zip
-	cmd := exec.Command("bash", "-c", "cd azure_functions_for_zip && zip -r ../azurefunctions.zip . && cd .. && zip -j azurefunctions.zip azurefunctions_setup/host.json")
+	cmd := exec.Command("bash", "-c", "cd azure_functions_for_zip && zip -r ../azurefunctions.zip . && cd .. && zip -j azurefunctions.zip azurefunctions_setup/host.json azurefunctions_setup/requirements.txt")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to zip function app files for deployment: %w", err)
 	}
@@ -281,7 +320,8 @@ func DeployFunction(config *Config, function []*common.Function) error {
 	cmd := exec.Command("az", "functionapp", "deployment", "source", "config-zip",
 		"--name", config.AzureConfig.FunctionAppName,
 		"--resource-group", config.AzureConfig.ResourceGroup,
-		"--src", zipFilePath)
+		"--src", zipFilePath,
+		"--build-remote", "true")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to deploy zip file to function app: %w", err)

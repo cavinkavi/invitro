@@ -3,28 +3,36 @@ import socket
 import json
 import azure.functions as func
 import logging
-from time import perf_counter
+from time import process_time_ns
+import math
+from psutil import virtual_memory
+from numpy import empty, float32
 
 # Global variable for hostname
 hostname = socket.gethostname()
 
-# Simulate the busySpin function
-def busy_spin(duration_ms: int) -> None:
-    end_time = perf_counter() + duration_ms / 1000  # Convert ms to seconds
-    while perf_counter() < end_time:
-        continue
+# Placeholder for `execute_function`
+def execute_function(input, runTime, totalMem):
+    startTime = process_time_ns()
 
-# Convert TraceFunctionExecution
-def trace_function_execution(start: float, time_left_milliseconds: int) -> str:
-    time_consumed_milliseconds = int((time.time() - start) * 1000)
-    if time_consumed_milliseconds < time_left_milliseconds:
-        time_left_milliseconds -= time_consumed_milliseconds
-        if time_left_milliseconds > 0:
-            busy_spin(time_left_milliseconds)
+    chunkSize = 2**10 # size of a kb or 1024
+    totalMem = totalMem*(2**10) # convert Mb to kb
+    memory = virtual_memory()
+    used = (memory.total - memory.available) // chunkSize # convert to kb
+    additional = max(1, (totalMem - used))
+    array = empty(additional*chunkSize, dtype=float32) # make an uninitialized array of that size, uninitialized to keep it fast
+    # convert to ns
+    runTime = (runTime - 1)*(10**6) # -1 because it should be slighly bellow that runtime
+    memoryIndex = 0
+    while process_time_ns() - startTime < runTime:
+        for i in range(0, chunkSize):
+            sin_i = math.sin(i)
+            cos_i = math.cos(i)
+            sqrt_i = math.sqrt(i)
+            array[memoryIndex + i] = sin_i
+        memoryIndex = (memoryIndex + chunkSize) % additional*chunkSize
+    return (process_time_ns() - startTime) // 1000
 
-    return f"OK - {hostname}"
-
-# The handler function for Azure Functions (Python)
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Processing request.")
 
@@ -47,16 +55,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     logging.info(f"Runtime requested: {runtime_milliseconds} ms, Memory: {memory_mebibytes} MiB")
 
-    # Trace the function execution (busy work simulation)
-    result_msg = trace_function_execution(start_time, runtime_milliseconds)
+    # Directly call the execute_function
+    duration = execute_function("",runtime_milliseconds,memory_mebibytes)
+    result_msg = f"Workload completed in {duration} microseconds"
 
     # Prepare the response
     response = {
         "Status": "Success",
         "Function": req.url.split("/")[-1],
         "MachineName": hostname,
-        "ExecutionTime": int((time.time() - start_time) * 1_000_000), 
-        "DurationInMicroSec": int((time.time() - start_time) * 1_000_000),
+        "ExecutionTime": int((time.time() - start_time) * 1_000_000),  # Total time (includes HTTP, workload, and response prep)
+        "DurationInMicroSec": duration,  # Time spent on the workload itself
         "MemoryUsageInKb": memory_mebibytes * 1024,
         "Message": result_msg
     }
@@ -68,4 +77,3 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         status_code=200,
         mimetype="application/json"
     )
-
