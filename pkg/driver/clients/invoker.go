@@ -1,11 +1,12 @@
 package clients
 
 import (
+	"sync"
+
 	"github.com/sirupsen/logrus"
 	"github.com/vhive-serverless/loader/pkg/common"
 	"github.com/vhive-serverless/loader/pkg/config"
 	"github.com/vhive-serverless/loader/pkg/metric"
-	"sync"
 )
 
 type Invoker interface {
@@ -16,6 +17,8 @@ func CreateInvoker(cfg *config.LoaderConfiguration, announceDoneExe *sync.WaitGr
 	switch cfg.Platform {
 	case "AWSLambda", "AWSLambda-RPS":
 		return newAWSLambdaInvoker(announceDoneExe)
+	case "AzureFunctions":
+		return newAzureFunctionsInvoker(announceDoneExe)
 	case "Dirigent", "Dirigent-RPS":
 		if cfg.InvokeProtocol == "grpc" {
 			return newGRPCInvoker(cfg)
